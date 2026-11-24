@@ -62,3 +62,4 @@ dependencies {
 
     debugImplementation("androidx.compose.ui:ui-tooling")
 }
+id("com.google.gms.google-services")
