@@ -5,18 +5,17 @@ on:
   push:
     branches:
       - main
-    paths:
-      - "app/**"
-      - "*.gradle.kts"
-      - "gradle.properties"
+
+permissions:
+  contents: read
 
 jobs:
   build:
     name: Build LYNKO APK
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
 
     steps:
-      - name: Download project
+      - name: Checkout project
         uses: actions/checkout@v4
 
       - name: Setup Java
@@ -27,6 +26,13 @@ jobs:
 
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
+        with:
+          packages: ''
+
+      - name: Install Android SDK packages
+        run: |
+          yes | sdkmanager --licenses || true
+          sdkmanager "platform-tools" "platforms;android-35" "build-tools;35.0.0"
 
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v4
