@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "675514536416",
+    "project_id": "lynko-685a4",
+    "storage_bucket": "lynko-685a4.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:675514536416:android:196aeaafc32a9506419b85",
+        "android_client_info": {
+          "package_name": "com.lynko.app"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBBhXwAWqCnrTTA8yMqMwHszzoYDvzMOM4"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
