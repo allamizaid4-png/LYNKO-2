@@ -1,0 +1,13 @@
+rules_version = '2';
+
+service cloud.firestore {
+    match /databases/{database}/documents {
+
+        // LYNKO security rules
+        // Deny all access until authenticated rules are configured.
+
+        match /{document=**} {
+            allow read, write: if false;
+        }
+    }
+}
