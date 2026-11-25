@@ -40,6 +40,7 @@ android {
 
 dependencies {
     implementation(platform("com.google.firebase:firebase-bom:33.7.0"))
+    implementation(platform("androidx.compose:compose-bom:2024.12.01"))
     implementation("com.google.firebase:firebase-auth")
     implementation("com.google.firebase:firebase-firestore")
     implementation("com.google.firebase:firebase-messaging")
