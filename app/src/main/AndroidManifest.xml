@@ -7,6 +7,8 @@
     <application
         android:allowBackup="true"
         android:label="LYNKO"
+        android:icon="@drawable/lynko_logo"
+android:roundIcon="@drawable/lynko_logo"
         android:supportsRtl="true"
         android:theme="@android:style/Theme.Material.Light.NoActionBar">
 
