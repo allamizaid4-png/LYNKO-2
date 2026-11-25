@@ -25,8 +25,6 @@ android {
             )
         }
 
-        debug {
-            applicationIdSuffix = ".debug"
         }
     }
 
