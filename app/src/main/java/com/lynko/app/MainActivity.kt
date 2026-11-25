@@ -1,3 +1,4 @@
+
 package com.lynko.app
 
 import android.os.Bundle
@@ -25,12 +26,12 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import kotlinx.coroutines.delay
+import com.google.firebase.auth.FirebaseAuth
+import com.google.firebase.firestore.FirebaseFirestore
 
 private val Ink = Color(0xFF101010)
 private val Paper = Color(0xFFF7F7F7)
 private val Muted = Color(0xFF777777)
-private val Gold = Color(0xFFC7A65A)
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -50,15 +51,31 @@ private enum class Tab(val title: String) {
 
 @Composable
 private fun LynkoApp() {
-    var screen by remember { mutableStateOf(Screen.Splash) }
-    var isFirstRun by remember { mutableStateOf(true) }
-    var selectedTab by remember { mutableStateOf(Tab.Chats) }
-    var notice by remember { mutableStateOf<String?>(null) }
+    val auth = remember { FirebaseAuth.getInstance() }
+
+    var screen by remember {
+        mutableStateOf(Screen.Splash)
+    }
+
+    var selectedTab by remember {
+        mutableStateOf(Tab.Chats)
+    }
+
+    var notice by remember {
+        mutableStateOf<String?>(null)
+    }
+
+    var createAccount by remember {
+        mutableStateOf(true)
+    }
 
     LaunchedEffect(Unit) {
-        delay(1500)
-        // TODO: Replace with FirebaseAuth.currentUser + persistent onboarding state.
-        screen = if (isFirstRun) Screen.Welcome else Screen.Home
+        kotlinx.coroutines.delay(1200)
+        screen = if (auth.currentUser != null) {
+            Screen.Home
+        } else {
+            Screen.Welcome
+        }
     }
 
     MaterialTheme(
@@ -70,7 +87,7 @@ private fun LynkoApp() {
         )
     ) {
         Surface(
-            Modifier.fillMaxSize(),
+            modifier = Modifier.fillMaxSize(),
             color = Paper
         ) {
             AnimatedContent(
@@ -84,23 +101,33 @@ private fun LynkoApp() {
                     Screen.Splash -> SplashScreen()
 
                     Screen.Welcome -> WelcomeScreen(
-                        onContinue = { screen = Screen.Auth },
+                        onContinue = {
+                            createAccount = true
+                            screen = Screen.Auth
+                        },
                         onExisting = {
-                            isFirstRun = false
+                            createAccount = false
                             screen = Screen.Auth
                         }
                     )
 
                     Screen.Auth -> AuthScreen(
-                        onBack = { screen = Screen.Welcome },
-                        onContinue = {
-                            notice = "اربط Firebase Auth لإكمال تسجيل الدخول الحقيقي."
+                        initialCreate = createAccount,
+                        onBack = {
+                            screen = Screen.Welcome
+                        },
+                        onSuccess = {
+                            screen = Screen.Home
                         }
                     )
 
                     Screen.Home -> HomeScreen(
-                        selectedTab,
-                        { selectedTab = it }
+                        selected = selectedTab,
+                        onSelect = { selectedTab = it },
+                        onLogout = {
+                            auth.signOut()
+                            screen = Screen.Welcome
+                        }
                     )
                 }
             }
@@ -109,11 +136,13 @@ private fun LynkoApp() {
                 AlertDialog(
                     onDismissRequest = { notice = null },
                     confirmButton = {
-                        TextButton(onClick = { notice = null }) {
+                        TextButton(onClick = {
+                            notice = null
+                        }) {
                             Text("حسناً")
                         }
                     },
-                    title = { Text("إعداد مطلوب") },
+                    title = { Text("LYNKO") },
                     text = { Text(message) }
                 )
             }
@@ -122,26 +151,21 @@ private fun LynkoApp() {
 }
 
 @Composable
-private fun BrandMark(modifier: Modifier = Modifier) {
+private fun BrandMark(
+    modifier: Modifier = Modifier
+) {
     Box(
         modifier = modifier
             .size(112.dp)
             .background(Ink, CircleShape),
         contentAlignment = Alignment.Center
     ) {
-        // Minimal monochrome emblem placeholder.
-        Box(
-            Modifier
-                .size(66.dp)
-                .background(Color.Transparent, CircleShape)
-        ) {
-            Icon(
-                Icons.Default.AllInclusive,
-                null,
-                tint = Color(0xFFE5E5E5),
-                modifier = Modifier.fillMaxSize()
-            )
-        }
+        Icon(
+            Icons.Default.AllInclusive,
+            null,
+            tint = Color.LightGray,
+            modifier = Modifier.fillMaxSize(0.6f)
+        )
     }
 }
 
@@ -170,9 +194,8 @@ private fun SplashScreen() {
 
         Text(
             "Connect Without Limits",
-            color = Color(0xFFBDBDBD),
-            fontSize = 12.sp,
-            letterSpacing = 1.sp
+            color = Color.LightGray,
+            fontSize = 12.sp
         )
     }
 }
@@ -186,7 +209,7 @@ private fun WelcomeScreen(
         Modifier
             .fillMaxSize()
             .background(Ink)
-            .padding(horizontal = 28.dp, vertical = 32.dp),
+            .padding(28.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center
     ) {
@@ -194,11 +217,7 @@ private fun WelcomeScreen(
 
         Spacer(Modifier.height(24.dp))
 
-        Text(
-            "مرحباً بك في",
-            color = Color.LightGray,
-            fontSize = 16.sp
-        )
+        Text("مرحباً بك في", color = Color.LightGray)
 
         Text(
             "LYNKO",
@@ -208,21 +227,12 @@ private fun WelcomeScreen(
             letterSpacing = 4.sp
         )
 
-        Spacer(Modifier.height(10.dp))
-
-        Text(
-            "Connect Without Limits",
-            color = Color(0xFFBDBDBD),
-            fontSize = 13.sp
-        )
-
-        Spacer(Modifier.height(54.dp))
+        Spacer(Modifier.height(40.dp))
 
         Text(
             "اختر رحلتك",
             color = Color.White,
-            fontSize = 23.sp,
-            fontWeight = FontWeight.SemiBold
+            fontSize = 23.sp
         )
 
         Spacer(Modifier.height(22.dp))
@@ -238,10 +248,7 @@ private fun WelcomeScreen(
             ),
             shape = RoundedCornerShape(16.dp)
         ) {
-            Text(
-                "إنشاء حساب جديد",
-                fontWeight = FontWeight.Bold
-            )
+            Text("إنشاء حساب جديد")
         }
 
         Spacer(Modifier.height(12.dp))
@@ -251,10 +258,10 @@ private fun WelcomeScreen(
             modifier = Modifier
                 .fillMaxWidth()
                 .height(54.dp),
+            shape = RoundedCornerShape(16.dp),
             colors = ButtonDefaults.outlinedButtonColors(
                 contentColor = Color.White
-            ),
-            shape = RoundedCornerShape(16.dp)
+            )
         ) {
             Text("لدي حساب بالفعل")
         }
@@ -263,12 +270,33 @@ private fun WelcomeScreen(
 
 @Composable
 private fun AuthScreen(
+    initialCreate: Boolean,
     onBack: () -> Unit,
-    onContinue: () -> Unit
+    onSuccess: () -> Unit
 ) {
-    var username by remember { mutableStateOf("") }
+    val auth = remember {
+        FirebaseAuth.getInstance()
+    }
+
+    val db = remember {
+        FirebaseFirestore.getInstance()
+    }
+
+    var email by remember { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
-    var create by remember { mutableStateOf(true) }
+    var username by remember { mutableStateOf("") }
+
+    var create by remember {
+        mutableStateOf(initialCreate)
+    }
+
+    var loading by remember {
+        mutableStateOf(false)
+    }
+
+    var error by remember {
+        mutableStateOf<String?>(null)
+    }
 
     Column(
         Modifier
@@ -296,46 +324,163 @@ private fun AuthScreen(
             color = Muted
         )
 
-        Spacer(Modifier.height(28.dp))
+        Spacer(Modifier.height(24.dp))
+
+        if (create) {
+            OutlinedTextField(
+                value = username,
+                onValueChange = { username = it },
+                modifier = Modifier.fillMaxWidth(),
+                label = { Text("اسم المستخدم") },
+                singleLine = true
+            )
+
+            Spacer(Modifier.height(12.dp))
+        }
 
         OutlinedTextField(
-            username,
-            { username = it },
+            value = email,
+            onValueChange = { email = it.trim() },
             modifier = Modifier.fillMaxWidth(),
-            label = {
-                Text("اسم المستخدم أو البريد الإلكتروني")
-            },
-            singleLine = true
+            label = { Text("البريد الإلكتروني") },
+            singleLine = true,
+            keyboardOptions = KeyboardOptions(
+                keyboardType = KeyboardType.Email
+            )
         )
 
         Spacer(Modifier.height(12.dp))
 
         OutlinedTextField(
-            password,
-            { password = it },
+            value = password,
+            onValueChange = { password = it },
             modifier = Modifier.fillMaxWidth(),
             label = { Text("كلمة المرور") },
             singleLine = true,
-            visualTransformation = PasswordVisualTransformation(),
+            visualTransformation =
+                PasswordVisualTransformation(),
             keyboardOptions = KeyboardOptions(
                 keyboardType = KeyboardType.Password
             )
         )
 
-        Spacer(Modifier.height(20.dp))
+        Spacer(Modifier.height(16.dp))
+
+        error?.let {
+            Text(
+                it,
+                color = MaterialTheme.colorScheme.error,
+                fontSize = 13.sp
+            )
+            Spacer(Modifier.height(8.dp))
+        }
 
         Button(
-            onClick = onContinue,
+            onClick = {
+                error = null
+
+                if (email.isBlank() ||
+                    password.isBlank()
+                ) {
+                    error = "أدخل البريد الإلكتروني وكلمة المرور"
+                    return@Button
+                }
+
+                if (create && username.isBlank()) {
+                    error = "أدخل اسم المستخدم"
+                    return@Button
+                }
+
+                if (create && password.length < 6) {
+                    error = "كلمة المرور يجب أن تكون 6 أحرف على الأقل"
+                    return@Button
+                }
+
+                loading = true
+
+                if (create) {
+                    auth.createUserWithEmailAndPassword(
+                        email,
+                        password
+                    ).addOnCompleteListener { task ->
+
+                        if (!task.isSuccessful) {
+                            loading = false
+                            error = task.exception?.localizedMessage
+                                ?: "تعذر إنشاء الحساب"
+                            return@addOnCompleteListener
+                        }
+
+                        val user = auth.currentUser
+
+                        if (user == null) {
+                            loading = false
+                            error = "تعذر الحصول على بيانات الحساب"
+                            return@addOnCompleteListener
+                        }
+
+                        val profile = hashMapOf(
+                            "uid" to user.uid,
+                            "email" to email,
+                            "username" to username.trim(),
+                            "createdAt" to
+                                com.google.firebase.firestore.FieldValue.serverTimestamp()
+                        )
+
+                        db.collection("users")
+                            .document(user.uid)
+                            .set(profile)
+                            .addOnCompleteListener { saveTask ->
+                                loading = false
+
+                                if (!saveTask.isSuccessful) {
+                                    error = "تم إنشاء الحساب، لكن تعذر حفظ الملف الشخصي. راجع قواعد Firestore."
+                                }
+
+                                onSuccess()
+                            }
+                    }
+                } else {
+                    auth.signInWithEmailAndPassword(
+                        email,
+                        password
+                    ).addOnCompleteListener { task ->
+                        loading = false
+
+                        if (task.isSuccessful) {
+                            onSuccess()
+                        } else {
+                            error = task.exception?.localizedMessage
+                                ?: "البريد أو كلمة المرور غير صحيحة"
+                        }
+                    }
+                }
+            },
+            enabled = !loading,
             modifier = Modifier
                 .fillMaxWidth()
                 .height(54.dp)
         ) {
-            Text(if (create) "إنشاء الحساب" else "دخول")
+            if (loading) {
+                CircularProgressIndicator(
+                    modifier = Modifier.size(22.dp),
+                    color = Color.White
+                )
+            } else {
+                Text(
+                    if (create) "إنشاء الحساب" else "دخول"
+                )
+            }
         }
 
         TextButton(
-            onClick = { create = !create },
-            modifier = Modifier.align(Alignment.CenterHorizontally)
+            onClick = {
+                create = !create
+                error = null
+            },
+            modifier = Modifier.align(
+                Alignment.CenterHorizontally
+            )
         ) {
             Text(
                 if (create)
@@ -344,30 +489,23 @@ private fun AuthScreen(
                     "مستخدم جديد؟ أنشئ حساباً"
             )
         }
-
-        Text(
-            "تسجيل الدخول الفعلي يتطلب إعداد Firebase قبل نشر التطبيق.",
-            color = Muted,
-            fontSize = 12.sp,
-            textAlign = TextAlign.Center,
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(top = 10.dp)
-        )
     }
 }
 
 @Composable
 private fun HomeScreen(
     selected: Tab,
-    onSelect: (Tab) -> Unit
+    onSelect: (Tab) -> Unit,
+    onLogout: () -> Unit
 ) {
     Scaffold(
         topBar = {
-            TopAppBarCompat()
+            TopAppBarCompat(onLogout)
         },
         bottomBar = {
-            NavigationBar(containerColor = Color.White) {
+            NavigationBar(
+                containerColor = Color.White
+            ) {
                 Tab.values().forEach { tab ->
                     val icon = when (tab) {
                         Tab.Chats -> Icons.Default.Chat
@@ -380,10 +518,7 @@ private fun HomeScreen(
                         selected = selected == tab,
                         onClick = { onSelect(tab) },
                         icon = {
-                            Icon(
-                                icon,
-                                contentDescription = tab.title
-                            )
+                            Icon(icon, tab.title)
                         },
                         label = { Text(tab.title) }
                     )
@@ -411,7 +546,7 @@ private fun HomeScreen(
                 Tab.Chats -> EmptyState(
                     Icons.Default.ChatBubbleOutline,
                     "محادثاتك ستظهر هنا",
-                    "ابدأ محادثة بعد ربط الحسابات والخادم."
+                    "قريباً ستتمكن من مراسلة أصدقائك."
                 )
 
                 Tab.Friends -> EmptyState(
@@ -423,7 +558,7 @@ private fun HomeScreen(
                 Tab.Groups -> EmptyState(
                     Icons.Default.Groups,
                     "مجموعاتك",
-                    "أنشئ مجموعات وتواصل مع أصدقائك."
+                    "تواصل مع أصدقائك في المجموعات."
                 )
 
                 Tab.Profile -> EmptyState(
@@ -438,7 +573,9 @@ private fun HomeScreen(
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun TopAppBarCompat() {
+private fun TopAppBarCompat(
+    onLogout: () -> Unit
+) {
     CenterAlignedTopAppBar(
         title = {
             Text(
@@ -455,16 +592,17 @@ private fun TopAppBarCompat() {
             )
         },
         actions = {
-            IconButton(onClick = {}) {
+            IconButton(onClick = onLogout) {
                 Icon(
-                    Icons.Default.NotificationsNone,
-                    "الإشعارات"
+                    Icons.Default.Logout,
+                    "تسجيل الخروج"
                 )
             }
         },
-        colors = TopAppBarDefaults.centerAlignedTopAppBarColors(
-            containerColor = Paper
-        )
+        colors =
+            TopAppBarDefaults.centerAlignedTopAppBarColors(
+                containerColor = Paper
+            )
     )
 }
 
