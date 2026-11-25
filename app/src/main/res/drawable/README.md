@@ -1,1 +1,0 @@
-LYNKO Logo Resources
