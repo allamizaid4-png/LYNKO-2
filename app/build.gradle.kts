@@ -1,7 +1,9 @@
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
     id("org.jetbrains.kotlin.plugin.compose")
+    id("com.google.gms.google-services")
 }
 
 android {
@@ -18,13 +20,11 @@ android {
 
     buildTypes {
         release {
-            isMinifyEnabled = true
+            isMinifyEnabled = false
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
-        }
-
         }
     }
 
@@ -36,28 +36,19 @@ android {
     kotlinOptions {
         jvmTarget = "17"
     }
-
-    buildFeatures {
-        compose = true
-    }
 }
 
 dependencies {
-    implementation(platform("androidx.compose:compose-bom:2024.12.01"))
-    implementation("androidx.activity:activity-compose:1.10.0")
-    implementation("androidx.compose.ui:ui")
-    implementation("androidx.compose.ui:ui-tooling-preview")
-    implementation("androidx.compose.material3:material3")
-    implementation("androidx.compose.material:material-icons-extended")
-    implementation("androidx.navigation:navigation-compose:2.8.5")
-    implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.8.7")
-    implementation("androidx.datastore:datastore-preferences:1.1.1")
-
     implementation(platform("com.google.firebase:firebase-bom:33.7.0"))
     implementation("com.google.firebase:firebase-auth")
     implementation("com.google.firebase:firebase-firestore")
     implementation("com.google.firebase:firebase-messaging")
 
-    debugImplementation("androidx.compose.ui:ui-tooling")
+    implementation("androidx.core:core-ktx:1.15.0")
+    implementation("androidx.activity:activity-compose:1.10.0")
+    implementation("androidx.compose.ui:ui")
+    implementation("androidx.compose.ui:ui-tooling-preview")
+    implementation("androidx.compose.material3:material3")
+    implementation("androidx.compose.material:material-icons-extended")
+    implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.8.7")
 }
-id("com.google.gms.google-services")
