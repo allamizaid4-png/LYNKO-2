@@ -12,6 +12,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
@@ -28,9 +29,13 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.google.firebase.Timestamp
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.firestore.FieldValue
 import com.google.firebase.firestore.FirebaseFirestore
+import com.google.firebase.firestore.Query
+import java.text.SimpleDateFormat
+import java.util.Locale
 
 private val Ink = Color(0xFF101010)
 private val Paper = Color(0xFFF7F7F7)
@@ -62,6 +67,25 @@ private data class FriendRequest(
     val senderId: String,
     val recipientId: String,
     val status: String
+)
+
+private data class ChatTarget(
+    val friend: UserProfile,
+    val conversationId: String
+)
+
+private data class ConversationPreview(
+    val id: String,
+    val friend: UserProfile,
+    val lastMessage: String,
+    val lastMessageAt: Timestamp?
+)
+
+private data class ChatMessage(
+    val id: String,
+    val senderId: String,
+    val text: String,
+    val createdAt: Timestamp?
 )
 
 @Composable
@@ -477,23 +501,80 @@ private fun HomeScreen(
     onSelect: (Tab) -> Unit,
     onLogout: () -> Unit
 ) {
+    val db = remember { FirebaseFirestore.getInstance() }
+    val uid = FirebaseAuth.getInstance().currentUser?.uid
+
+    var activeChat by remember { mutableStateOf<ChatTarget?>(null) }
+    var openingChat by remember { mutableStateOf(false) }
+    var openError by remember { mutableStateOf<String?>(null) }
+
+    fun openConversation(friend: UserProfile) {
+        if (uid == null || uid == friend.uid || openingChat) return
+
+        openingChat = true
+        openError = null
+
+        val participants = listOf(uid, friend.uid).sorted()
+        val conversationId = participants.joinToString("_")
+        val conversationRef = db.collection("conversations")
+            .document(conversationId)
+
+        conversationRef.get()
+            .addOnSuccessListener { document ->
+                if (document.exists()) {
+                    activeChat = ChatTarget(friend, conversationId)
+                    openingChat = false
+                } else {
+                    val conversation = hashMapOf(
+                        "participants" to participants,
+                        "createdAt" to FieldValue.serverTimestamp(),
+                        "lastMessage" to "",
+                        "lastMessageAt" to FieldValue.serverTimestamp()
+                    )
+
+                    conversationRef.set(conversation)
+                        .addOnSuccessListener {
+                            activeChat = ChatTarget(friend, conversationId)
+                            openingChat = false
+                        }
+                        .addOnFailureListener {
+                            openingChat = false
+                            openError = "تعذر إنشاء المحادثة: ${it.localizedMessage}"
+                        }
+                }
+            }
+            .addOnFailureListener {
+                openingChat = false
+                openError = "تعذر فتح المحادثة: ${it.localizedMessage}"
+            }
+    }
+
     Scaffold(
         topBar = {
             CenterAlignedTopAppBar(
                 title = {
                     Text(
-                        "LYNKO",
+                        activeChat?.friend?.username ?: "LYNKO",
                         fontWeight = FontWeight.Bold,
-                        letterSpacing = 3.sp
+                        letterSpacing = if (activeChat == null) 3.sp else 0.sp
                     )
                 },
                 navigationIcon = {
-                    BrandMark(
-                        Modifier.padding(start = 12.dp).size(34.dp)
-                    )
+                    if (activeChat != null) {
+                        IconButton(onClick = { activeChat = null }) {
+                            Icon(Icons.Default.ArrowBack, "رجوع")
+                        }
+                    } else {
+                        BrandMark(
+                            Modifier.padding(start = 12.dp).size(34.dp)
+                        )
+                    }
                 },
                 actions = {
-                    IconButton(onClick = onLogout) {
+                    IconButton(onClick = {
+                        activeChat = null
+                        onLogout()
+                    }) {
                         Icon(Icons.Default.Logout, "تسجيل الخروج")
                     }
                 },
@@ -503,57 +584,567 @@ private fun HomeScreen(
             )
         },
         bottomBar = {
-            NavigationBar(containerColor = Color.White) {
-                Tab.values().forEach { tab ->
-                    val icon = when (tab) {
-                        Tab.Chats -> Icons.Default.Chat
-                        Tab.Friends -> Icons.Default.People
-                        Tab.Groups -> Icons.Default.Groups
-                        Tab.Profile -> Icons.Default.Person
-                    }
+            if (activeChat == null) {
+                NavigationBar(containerColor = Color.White) {
+                    Tab.values().forEach { tab ->
+                        val icon = when (tab) {
+                            Tab.Chats -> Icons.Default.Chat
+                            Tab.Friends -> Icons.Default.People
+                            Tab.Groups -> Icons.Default.Groups
+                            Tab.Profile -> Icons.Default.Person
+                        }
 
-                    NavigationBarItem(
-                        selected = selected == tab,
-                        onClick = { onSelect(tab) },
-                        icon = { Icon(icon, tab.title) },
-                        label = { Text(tab.title) }
-                    )
+                        NavigationBarItem(
+                            selected = selected == tab,
+                            onClick = { onSelect(tab) },
+                            icon = { Icon(icon, tab.title) },
+                            label = { Text(tab.title) }
+                        )
+                    }
                 }
             }
         },
         containerColor = Paper
     ) { padding ->
-        when (selected) {
-            Tab.Friends -> FriendsScreen(
-                Modifier.padding(padding)
-            )
+        when {
+            activeChat != null -> {
+                ChatScreen(
+                    target = activeChat!!,
+                    modifier = Modifier.padding(padding)
+                )
+            }
 
-            Tab.Chats -> EmptyState(
-                Modifier.padding(padding),
-                Icons.Default.ChatBubbleOutline,
-                "محادثاتك",
-                "ستظهر محادثاتك هنا."
-            )
+            else -> {
+                Column(Modifier.fillMaxSize()) {
+                    openError?.let {
+                        Text(
+                            it,
+                            color = MaterialTheme.colorScheme.error,
+                            modifier = Modifier.padding(horizontal = 16.dp)
+                        )
+                    }
 
-            Tab.Groups -> EmptyState(
-                Modifier.padding(padding),
-                Icons.Default.Groups,
-                "مجموعاتك",
-                "تواصل مع أصدقائك في المجموعات."
-            )
+                    if (openingChat) {
+                        LinearProgressIndicator(Modifier.fillMaxWidth())
+                    }
 
-            Tab.Profile -> EmptyState(
-                Modifier.padding(padding),
-                Icons.Default.AccountCircle,
-                "ملفك الشخصي",
-                "إعدادات الحساب والصورة والحالة."
-            )
+                    when (selected) {
+                        Tab.Friends -> FriendsScreen(
+                            Modifier.padding(padding),
+                            onOpenChat = { openConversation(it) }
+                        )
+
+                        Tab.Chats -> ChatsScreen(
+                            modifier = Modifier.padding(padding),
+                            onOpenChat = { openConversation(it) }
+                        )
+
+                        Tab.Groups -> EmptyState(
+                            Modifier.padding(padding),
+                            Icons.Default.Groups,
+                            "مجموعاتك",
+                            "تواصل مع أصدقائك في المجموعات."
+                        )
+
+                        Tab.Profile -> EmptyState(
+                            Modifier.padding(padding),
+                            Icons.Default.AccountCircle,
+                            "ملفك الشخصي",
+                            "إعدادات الحساب والصورة والحالة."
+                        )
+                    }
+                }
+            }
         }
     }
 }
 
 @Composable
-private fun FriendsScreen(modifier: Modifier = Modifier) {
+private fun ChatsScreen(
+    modifier: Modifier = Modifier,
+    onOpenChat: (UserProfile) -> Unit
+) {
+    val db = remember { FirebaseFirestore.getInstance() }
+    val uid = FirebaseAuth.getInstance().currentUser?.uid
+
+    var conversations by remember {
+        mutableStateOf<List<ConversationPreview>>(emptyList())
+    }
+    var loading by remember { mutableStateOf(true) }
+    var error by remember { mutableStateOf<String?>(null) }
+
+    DisposableEffect(uid) {
+        if (uid == null) {
+            loading = false
+            onDispose {}
+        } else {
+            val registration = db.collection("conversations")
+                .whereArrayContains("participants", uid)
+                .addSnapshotListener { snapshot, exception ->
+                    if (exception != null) {
+                        error = "تعذر تحميل المحادثات: ${exception.localizedMessage}"
+                        loading = false
+                        return@addSnapshotListener
+                    }
+
+                    if (snapshot == null) {
+                        loading = false
+                        return@addSnapshotListener
+                    }
+
+                    val documents = snapshot.documents
+
+                    if (documents.isEmpty()) {
+                        conversations = emptyList()
+                        loading = false
+                        return@addSnapshotListener
+                    }
+
+                    val loaded = mutableListOf<ConversationPreview>()
+                    var remaining = documents.size
+
+                    documents.forEach { document ->
+                        val participants = document.get("participants") as? List<*>
+                        val friendId = participants
+                            ?.filterIsInstance<String>()
+                            ?.firstOrNull { it != uid }
+
+                        if (friendId == null) {
+                            remaining--
+                            if (remaining == 0) {
+                                conversations = loaded.sortedByDescending {
+                                    it.lastMessageAt?.toDate()?.time ?: 0L
+                                }
+                                loading = false
+                            }
+                        } else {
+                            db.collection("publicProfiles")
+                                .document(friendId)
+                                .get()
+                                .addOnSuccessListener { profile ->
+                                    val username = profile.getString("username")
+                                        ?: "مستخدم LYNKO"
+
+                                    loaded.add(
+                                        ConversationPreview(
+                                            id = document.id,
+                                            friend = UserProfile(friendId, username),
+                                            lastMessage = document.getString("lastMessage") ?: "",
+                                            lastMessageAt = document.getTimestamp("lastMessageAt")
+                                        )
+                                    )
+
+                                    remaining--
+
+                                    if (remaining == 0) {
+                                        conversations = loaded.sortedByDescending {
+                                            it.lastMessageAt?.toDate()?.time ?: 0L
+                                        }
+                                        loading = false
+                                        error = null
+                                    }
+                                }
+                                .addOnFailureListener {
+                                    remaining--
+                                    if (remaining == 0) {
+                                        conversations = loaded.sortedByDescending {
+                                            it.lastMessageAt?.toDate()?.time ?: 0L
+                                        }
+                                        loading = false
+                                    }
+                                }
+                        }
+                    }
+                }
+
+            onDispose {
+                registration.remove()
+            }
+        }
+    }
+
+    Column(
+        modifier.fillMaxSize().padding(16.dp)
+    ) {
+        Text(
+            "المحادثات",
+            fontSize = 27.sp,
+            fontWeight = FontWeight.Bold,
+            color = Ink
+        )
+
+        Spacer(Modifier.height(14.dp))
+
+        error?.let {
+            Text(it, color = MaterialTheme.colorScheme.error)
+        }
+
+        if (loading) {
+            LinearProgressIndicator(Modifier.fillMaxWidth())
+            Spacer(Modifier.height(12.dp))
+        }
+
+        if (!loading && conversations.isEmpty()) {
+            EmptyState(
+                Modifier.fillMaxWidth(),
+                Icons.Default.ChatBubbleOutline,
+                "لا توجد محادثات بعد",
+                "اذهب إلى الأصدقاء واضغط مراسلة لبدء محادثتك الأولى."
+            )
+        } else {
+            LazyColumn {
+                items(conversations, key = { it.id }) { conversation ->
+                    Card(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 5.dp),
+                        shape = RoundedCornerShape(16.dp),
+                        colors = CardDefaults.cardColors(
+                            containerColor = Color.White
+                        ),
+                        onClick = {
+                            onOpenChat(conversation.friend)
+                        }
+                    ) {
+                        Row(
+                            Modifier.fillMaxWidth().padding(14.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Surface(
+                                modifier = Modifier.size(48.dp),
+                                shape = CircleShape,
+                                color = Ink
+                            ) {
+                                Box(contentAlignment = Alignment.Center) {
+                                    Icon(
+                                        Icons.Default.Person,
+                                        null,
+                                        tint = Color.White
+                                    )
+                                }
+                            }
+
+                            Spacer(Modifier.width(12.dp))
+
+                            Column(Modifier.weight(1f)) {
+                                Text(
+                                    conversation.friend.username,
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 16.sp
+                                )
+                                Spacer(Modifier.height(4.dp))
+                                Text(
+                                    conversation.lastMessage.ifBlank {
+                                        "ابدأ المحادثة الآن"
+                                    },
+                                    color = Muted,
+                                    fontSize = 13.sp,
+                                    maxLines = 1
+                                )
+                            }
+
+                            Icon(
+                                Icons.Default.ChevronRight,
+                                null,
+                                tint = Muted
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ChatScreen(
+    target: ChatTarget,
+    modifier: Modifier = Modifier
+) {
+    val db = remember { FirebaseFirestore.getInstance() }
+    val uid = FirebaseAuth.getInstance().currentUser?.uid ?: ""
+
+    var messages by remember {
+        mutableStateOf<List<ChatMessage>>(emptyList())
+    }
+    var text by remember { mutableStateOf("") }
+    var sending by remember { mutableStateOf(false) }
+    var error by remember { mutableStateOf<String?>(null) }
+
+    val listState = rememberLazyListState()
+
+    DisposableEffect(target.conversationId) {
+        val registration = db.collection("conversations")
+            .document(target.conversationId)
+            .collection("messages")
+            .orderBy("createdAt", Query.Direction.ASCENDING)
+            .addSnapshotListener { snapshot, exception ->
+                if (exception != null) {
+                    error = "تعذر تحميل الرسائل: ${exception.localizedMessage}"
+                    return@addSnapshotListener
+                }
+
+                if (snapshot != null) {
+                    messages = snapshot.documents.mapNotNull { document ->
+                        val sender = document.getString("senderId")
+                            ?: return@mapNotNull null
+                        val messageText = document.getString("text")
+                            ?: return@mapNotNull null
+
+                        ChatMessage(
+                            id = document.id,
+                            senderId = sender,
+                            text = messageText,
+                            createdAt = document.getTimestamp("createdAt")
+                        )
+                    }
+                }
+            }
+
+        onDispose {
+            registration.remove()
+        }
+    }
+
+    LaunchedEffect(messages.size) {
+        if (messages.isNotEmpty()) {
+            listState.animateScrollToItem(messages.lastIndex)
+        }
+    }
+
+    fun sendMessage() {
+        val messageText = text.trim()
+
+        if (messageText.isEmpty() || sending || uid.isEmpty()) return
+
+        sending = true
+        error = null
+
+        val conversationRef = db.collection("conversations")
+            .document(target.conversationId)
+
+        val message = hashMapOf(
+            "senderId" to uid,
+            "text" to messageText,
+            "createdAt" to FieldValue.serverTimestamp()
+        )
+
+        conversationRef.collection("messages")
+            .add(message)
+            .addOnSuccessListener {
+                text = ""
+
+                conversationRef.update(
+                    mapOf(
+                        "lastMessage" to messageText,
+                        "lastMessageAt" to FieldValue.serverTimestamp()
+                    )
+                ).addOnSuccessListener {
+                    sending = false
+                }.addOnFailureListener { exception ->
+                    sending = false
+                    error = "أُرسلت الرسالة، لكن تعذر تحديث آخر رسالة: ${exception.localizedMessage}"
+                }
+            }
+            .addOnFailureListener { exception ->
+                sending = false
+                error = "تعذر إرسال الرسالة: ${exception.localizedMessage}"
+            }
+    }
+
+    Column(
+        modifier = modifier.fillMaxSize().background(Paper)
+    ) {
+        Row(
+            Modifier.fillMaxWidth().background(Color.White).padding(12.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Surface(
+                modifier = Modifier.size(38.dp),
+                shape = CircleShape,
+                color = Ink
+            ) {
+                Box(contentAlignment = Alignment.Center) {
+                    Icon(
+                        Icons.Default.Person,
+                        null,
+                        tint = Color.White
+                    )
+                }
+            }
+
+            Spacer(Modifier.width(10.dp))
+
+            Column {
+                Text(
+                    target.friend.username,
+                    fontWeight = FontWeight.Bold
+                )
+                Text(
+                    "محادثة خاصة",
+                    color = Muted,
+                    fontSize = 11.sp
+                )
+            }
+        }
+
+        HorizontalDivider(color = Color(0xFFEAEAEA))
+
+        error?.let {
+            Text(
+                it,
+                color = MaterialTheme.colorScheme.error,
+                modifier = Modifier.padding(10.dp),
+                fontSize = 12.sp
+            )
+        }
+
+        if (messages.isEmpty()) {
+            Box(
+                Modifier.weight(1f).fillMaxWidth(),
+                contentAlignment = Alignment.Center
+            ) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Icon(
+                        Icons.Default.ChatBubbleOutline,
+                        null,
+                        tint = Muted,
+                        modifier = Modifier.size(48.dp)
+                    )
+                    Spacer(Modifier.height(12.dp))
+                    Text(
+                        "ابدأ المحادثة",
+                        fontWeight = FontWeight.SemiBold
+                    )
+                    Text(
+                        "أرسل أول رسالة إلى ${target.friend.username}",
+                        color = Muted,
+                        fontSize = 13.sp
+                    )
+                }
+            }
+        } else {
+            LazyColumn(
+                modifier = Modifier.weight(1f).fillMaxWidth().padding(12.dp),
+                state = listState,
+                verticalArrangement = Arrangement.spacedBy(9.dp)
+            ) {
+                items(messages, key = { it.id }) { message ->
+                    val mine = message.senderId == uid
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = if (mine) {
+                            Arrangement.End
+                        } else {
+                            Arrangement.Start
+                        }
+                    ) {
+                        Column(
+                            horizontalAlignment = if (mine) {
+                                Alignment.End
+                            } else {
+                                Alignment.Start
+                            }
+                        ) {
+                            Surface(
+                                color = if (mine) Ink else Color.White,
+                                shape = RoundedCornerShape(
+                                    topStart = 16.dp,
+                                    topEnd = 16.dp,
+                                    bottomStart = if (mine) 16.dp else 4.dp,
+                                    bottomEnd = if (mine) 4.dp else 16.dp
+                                ),
+                                shadowElevation = 1.dp
+                            ) {
+                                Text(
+                                    message.text,
+                                    color = if (mine) Color.White else Ink,
+                                    modifier = Modifier.padding(
+                                        horizontal = 14.dp,
+                                        vertical = 10.dp
+                                    ),
+                                    fontSize = 15.sp
+                                )
+                            }
+
+                            message.createdAt?.let { timestamp ->
+                                Text(
+                                    SimpleDateFormat(
+                                        "hh:mm a",
+                                        Locale.getDefault()
+                                    ).format(timestamp.toDate()),
+                                    color = Muted,
+                                    fontSize = 10.sp,
+                                    modifier = Modifier.padding(
+                                        top = 3.dp,
+                                        start = 4.dp,
+                                        end = 4.dp
+                                    )
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        HorizontalDivider(color = Color(0xFFEAEAEA))
+
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .background(Color.White)
+                .navigationBarsPadding()
+                .imePadding()
+                .padding(horizontal = 10.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            OutlinedTextField(
+                value = text,
+                onValueChange = { text = it },
+                modifier = Modifier.weight(1f),
+                placeholder = { Text("اكتب رسالة...") },
+                shape = RoundedCornerShape(24.dp),
+                maxLines = 4,
+                enabled = !sending
+            )
+
+            Spacer(Modifier.width(8.dp))
+
+            IconButton(
+                onClick = { sendMessage() },
+                enabled = text.isNotBlank() && !sending,
+                modifier = Modifier
+                    .size(48.dp)
+                    .background(
+                        if (text.isNotBlank() && !sending) Ink else Muted,
+                        CircleShape
+                    )
+            ) {
+                if (sending) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(21.dp),
+                        color = Color.White,
+                        strokeWidth = 2.dp
+                    )
+                } else {
+                    Icon(
+                        Icons.Default.Send,
+                        "إرسال",
+                        tint = Color.White
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun FriendsScreen(
+    modifier: Modifier = Modifier,
+    onOpenChat: (UserProfile) -> Unit
+) {
     val db = remember { FirebaseFirestore.getInstance() }
     val uid = FirebaseAuth.getInstance().currentUser?.uid
 
@@ -576,8 +1167,11 @@ private fun FriendsScreen(modifier: Modifier = Modifier) {
             .get()
             .addOnSuccessListener { snapshot ->
                 incoming = snapshot.documents.mapNotNull { doc ->
-                    val sender = doc.getString("senderId") ?: return@mapNotNull null
-                    val recipient = doc.getString("recipientId") ?: return@mapNotNull null
+                    val sender = doc.getString("senderId")
+                        ?: return@mapNotNull null
+                    val recipient = doc.getString("recipientId")
+                        ?: return@mapNotNull null
+
                     FriendRequest(
                         doc.id,
                         sender,
@@ -591,8 +1185,11 @@ private fun FriendsScreen(modifier: Modifier = Modifier) {
                     .get()
                     .addOnSuccessListener { sent ->
                         outgoing = sent.documents.mapNotNull { doc ->
-                            val sender = doc.getString("senderId") ?: return@mapNotNull null
-                            val recipient = doc.getString("recipientId") ?: return@mapNotNull null
+                            val sender = doc.getString("senderId")
+                                ?: return@mapNotNull null
+                            val recipient = doc.getString("recipientId")
+                                ?: return@mapNotNull null
+
                             FriendRequest(
                                 doc.id,
                                 sender,
@@ -633,6 +1230,7 @@ private fun FriendsScreen(modifier: Modifier = Modifier) {
                                             .addOnSuccessListener { profile ->
                                                 val name = profile.getString("username")
                                                     ?: "مستخدم LYNKO"
+
                                                 loaded.add(UserProfile(friendId, name))
                                                 remaining--
 
@@ -689,13 +1287,14 @@ private fun FriendsScreen(modifier: Modifier = Modifier) {
             Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(6.dp)
         ) {
-            listOf("بحث", "الواردة", "المرسلة", "أصدقائي").forEachIndexed { index, title ->
-                FilterChip(
-                    selected = section == index,
-                    onClick = { section = index },
-                    label = { Text(title) }
-                )
-            }
+            listOf("بحث", "الواردة", "المرسلة", "أصدقائي")
+                .forEachIndexed { index, title ->
+                    FilterChip(
+                        selected = section == index,
+                        onClick = { section = index },
+                        label = { Text(title) }
+                    )
+                }
         }
 
         Spacer(Modifier.height(14.dp))
@@ -724,6 +1323,7 @@ private fun FriendsScreen(modifier: Modifier = Modifier) {
                         IconButton(
                             onClick = {
                                 val term = searchText.trim()
+
                                 if (term.length < 3) {
                                     message = "أدخل 3 أحرف على الأقل."
                                 } else {
@@ -738,6 +1338,7 @@ private fun FriendsScreen(modifier: Modifier = Modifier) {
                                             results = snapshot.documents.mapNotNull { doc ->
                                                 val name = doc.getString("username")
                                                     ?: return@mapNotNull null
+
                                                 if (doc.id == uid) null
                                                 else UserProfile(doc.id, name)
                                             }
@@ -764,48 +1365,49 @@ private fun FriendsScreen(modifier: Modifier = Modifier) {
                             actionText = "إضافة",
                             icon = Icons.Default.PersonAdd,
                             onAction = {
-                                if (uid == null) return@UserRow
+                                if (uid != null) {
+                                    loading = true
+                                    message = null
 
-                                loading = true
-                                message = null
+                                    db.collection("friendRequests")
+                                        .whereEqualTo("senderId", uid)
+                                        .get()
+                                        .addOnSuccessListener { sent ->
+                                            val exists = sent.documents.any {
+                                                it.getString("recipientId") == user.uid &&
+                                                    it.getString("status") in
+                                                    listOf("pending", "accepted")
+                                            }
 
-                                db.collection("friendRequests")
-                                    .whereEqualTo("senderId", uid)
-                                    .get()
-                                    .addOnSuccessListener { sent ->
-                                        val exists = sent.documents.any {
-                                            it.getString("recipientId") == user.uid &&
-                                                it.getString("status") in listOf("pending", "accepted")
+                                            if (exists) {
+                                                loading = false
+                                                message = "سبق إرسال طلب لهذا المستخدم أو أنكما صديقان."
+                                            } else {
+                                                val request = hashMapOf(
+                                                    "senderId" to uid,
+                                                    "recipientId" to user.uid,
+                                                    "status" to "pending",
+                                                    "createdAt" to FieldValue.serverTimestamp()
+                                                )
+
+                                                db.collection("friendRequests")
+                                                    .add(request)
+                                                    .addOnSuccessListener {
+                                                        loading = false
+                                                        message = "تم إرسال طلب الصداقة."
+                                                        refresh()
+                                                    }
+                                                    .addOnFailureListener {
+                                                        loading = false
+                                                        message = "تعذر إرسال الطلب: ${it.localizedMessage}"
+                                                    }
+                                            }
                                         }
-
-                                        if (exists) {
+                                        .addOnFailureListener {
                                             loading = false
-                                            message = "سبق إرسال طلب لهذا المستخدم أو أنكما صديقان."
-                                        } else {
-                                            val request = hashMapOf(
-                                                "senderId" to uid,
-                                                "recipientId" to user.uid,
-                                                "status" to "pending",
-                                                "createdAt" to FieldValue.serverTimestamp()
-                                            )
-
-                                            db.collection("friendRequests")
-                                                .add(request)
-                                                .addOnSuccessListener {
-                                                    loading = false
-                                                    message = "تم إرسال طلب الصداقة."
-                                                    refresh()
-                                                }
-                                                .addOnFailureListener {
-                                                    loading = false
-                                                    message = "تعذر إرسال الطلب: ${it.localizedMessage}"
-                                                }
+                                            message = "تعذر التحقق من الطلبات السابقة."
                                         }
-                                    }
-                                    .addOnFailureListener {
-                                        loading = false
-                                        message = "تعذر التحقق من الطلبات السابقة."
-                                    }
+                                }
                             }
                         )
                     }
@@ -846,6 +1448,7 @@ private fun FriendsScreen(modifier: Modifier = Modifier) {
                         )
                     }
                 }
+
                 if (incoming.isEmpty()) {
                     EmptyMessage("لا توجد طلبات واردة حالياً.")
                 }
@@ -865,6 +1468,7 @@ private fun FriendsScreen(modifier: Modifier = Modifier) {
                         )
                     }
                 }
+
                 if (outgoing.isEmpty()) {
                     EmptyMessage("لا توجد طلبات مرسلة.")
                 }
@@ -875,12 +1479,15 @@ private fun FriendsScreen(modifier: Modifier = Modifier) {
                     items(friends, key = { it.uid }) { friend ->
                         UserRow(
                             user = friend,
-                            actionText = "صديق",
-                            icon = Icons.Default.CheckCircle,
-                            onAction = {}
+                            actionText = "مراسلة",
+                            icon = Icons.Default.Chat,
+                            onAction = {
+                                onOpenChat(friend)
+                            }
                         )
                     }
                 }
+
                 if (friends.isEmpty()) {
                     EmptyMessage("لم تضف أي أصدقاء بعد.")
                 }
